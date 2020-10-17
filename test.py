@@ -1,4 +1,3 @@
-from app import hello
 from customTypes import Number
 import unittest
 
