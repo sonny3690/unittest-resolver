@@ -4,10 +4,14 @@ from types import ModuleType
 from typing import List
 import test
 import inspect
+from collections import defaultdict
+
+
+class Context(dict):
+    ...
 
 
 class Reader:
-
     @staticmethod
     @contextmanager
     def read(testModuleName: str):
@@ -17,22 +21,37 @@ class Reader:
         pass
 
 
-with open("test.py", "r") as source:
-    tree = ast.parse(source.read())
+def _extractFunctionCalls(node: ast):
+    pass
 
-source = inspect.getsource(test)
+
+def recurse(parent: ast, num=0):
+    print('level ------ {}'.format(num))
+    for node in ast.iter_child_nodes(parent):
+        print('node', node)
+        print(ast.dump(node))
+
+        if hasattr(node, 'id'):
+            print(node.id)
+        recurse(node, num+1)
 
 
 def findUnitTestClass(classNode: ast.ClassDef):
-    def _isUnitTest(base: List[expr]) -> bool:
+    def _isUnitTest(base: List[ast.expr]) -> bool:
         return base.value.id == 'unittest' and base.attr == 'TestCase'
 
-    if not any(_isUnitTest, classNode.bases):
+    if not any(map(_isUnitTest, classNode.bases)):
         return False
 
-    for node in ast.iter_child_nodes(classNode):
-        if isinstance(node, ast.FunctionDef):
+    recurse(node)
 
+
+def hi():
+    pass
+
+
+with open("test.py", "r") as source:
+    tree = ast.parse(source.read())
 
 for node in ast.iter_child_nodes(tree):
     if isinstance(node, ast.ClassDef):
