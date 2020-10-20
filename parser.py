@@ -1,67 +1,114 @@
 import ast
 from contextlib import contextmanager
 from types import ModuleType
-from typing import List
+from typing import List, Generator
 import test
 import inspect
 from collections import defaultdict, deque
-from typeguards import _isClassDef, _isScopeCreator
+from typeguards import _isClassDef, _isScopeCreator, _isFunctionDef, _isCall
+import itertools
+from collections import defaultdict
+import base64
+from functools import lru_cache
 
 
 class Context(dict):
+    def __init__(self, *, parent=None, name='global'):
+        self.__parent = parent
+        self.__children = []
+        self.__name = name
 
-    def __init__(self, parent=None):
+    @property
+    def _parent(self):
+        return self.__parent
+
+    @_parent.setter
+    def _parent(self, parent):
+        assert(parent is not None)
         self.__parent = parent
 
-    def _parent(self):
-        pass
+    def addChild(self, child: dict):
+        child._parent = self
+        self.__children.append(child)
 
-    _parent: 'Class' = None
-    _children: List['Class'] = []
+    def addNode(self, node: ast):
+        if _isClassDef(node):
+            self['class'] = node
+        elif _isFunctionDef(node):
+            self['function'] = node
 
 
-class Reader:
-    @staticmethod
-    @contextmanager
-    def read(testModuleName: str):
-        pass
+class DeclarationMap(defaultdict):
+    '''
+    Mapping of declarationID to references in the form of ast nodes.
 
-    def _findPathModule(self, path: str):
-        pass
+    It's not collision proof unfortunately, but we'll have to do without it for now.
+    '''
+    ...
+
+
+class idMap(dict):
+    '''
+    Maps declarationID to node
+    '''
+
+
+@lru_cache(maxsize=100)
+def encodeID(name: str):
+    return base64.b64encode(name)
+
+
+@lru_cache(maxsize=100)
+def decodeID(id: str):
+    return base64.b64decode(id)
+
+
+_global_context = Context()
+_references = defaultdict(list)
 
 
 def _extractFunctionCalls(node: ast):
     pass
 
 
-_global_context = Context()
+def findTestCaseCalls(node: ast, context: Context = _global_context):
+    queue: Generator = iter([node])
+    prevContext, currContext = context, context
+
+    while True:
+        try:
+            curr = next(queue)
+            if _isScopeCreator(curr):
+                # we ought to keep looking
+                queue = itertools.chain(ast.iter_child_nodes(curr))
+            elif _isCall(curr):
+                # storeCall()
+                pass
+
+        except StopIteration:
+            break
 
 
-def recurse(parent: ast, *, context: Context = None, num=0) -> None:
-    if context is None:
-        context = _global_context
+def findUnitTestClass(node: ast.ClassDef):
 
-    for node in ast.iter_child_nodes(parent):
-        if _isScopeCreator(node):
-            context = Context()
-
-        if hasattr(node, 'id'):
-            print(node.id)
-        recurse(node, context=context, num=num+1)
-
-
-def findUnitTestClass(classNode: ast.ClassDef):
+    # unit test identifier
     def _isUnitTest(base: List[ast.expr]) -> bool:
         return base.value.id == 'unittest' and base.attr == 'TestCase'
 
-    if not any(map(_isUnitTest, classNode.bases)):
-        return False
-    recurse(node)
-
-
-with open("test.py", "r") as source:
-    tree = ast.parse(source.read())
-
-for node in ast.iter_child_nodes(tree):
     if _isClassDef(node):
+        if not any(map(_isUnitTest, node.bases)):
+            return False
+        findTestCaseCalls(node)
+
+
+# main thread starter that starts everything
+def doWork():
+    with open("test.py", "r") as source:
+        tree = ast.parse(source.read())
+
+    # just look one level down for the test
+    for node in ast.iter_child_nodes(tree):
         findUnitTestClass(node)
+
+
+doWork()
