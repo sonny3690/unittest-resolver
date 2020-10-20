@@ -16,11 +16,17 @@ class Context(dict):
     def __init__(self, *, parent=None, name='global'):
         self.__parent = parent
         self.__children = []
+
+        # name should be immutable
         self.__name = name
 
     @property
     def _parent(self):
         return self.__parent
+
+    @property
+    def name(self):
+        return self.__name
 
     @_parent.setter
     def _parent(self, parent):
@@ -51,23 +57,31 @@ class idMap(dict):
     '''
     Maps declarationID to node
     '''
-
-
-@lru_cache(maxsize=100)
-def encodeID(name: str):
-    return base64.b64encode(name)
-
-
-@lru_cache(maxsize=100)
-def decodeID(id: str):
-    return base64.b64decode(id)
+    ...
 
 
 _global_context = Context()
 _references = defaultdict(list)
 
 
-def _extractFunctionCalls(node: ast):
+@lru_cache(maxsize=100)
+def encodeID(name: str, context: Context):
+    path = ''
+
+    while context:
+        path = "{}#{}".format(context.name, path)
+        context = context._parent
+    return base64.b64encode(path + name)
+
+
+@lru_cache(maxsize=100)
+def decodeID(id: str):
+    return base64.b64decode(id).split('#')[-1]
+
+
+def _extractFunctionCall(node: ast.Call):
+    print(node)
+
     pass
 
 
@@ -78,14 +92,17 @@ def findTestCaseCalls(node: ast, context: Context = _global_context):
     while True:
         try:
             curr = next(queue)
+            print(curr)
             if _isScopeCreator(curr):
-                # we ought to keep looking
-                queue = itertools.chain(ast.iter_child_nodes(curr))
-            elif _isCall(curr):
-                # storeCall()
-                pass
+                # we ought to keep looking through oulr queue, especially through our new citizens
 
+            elif _isCall(curr):
+                _extractFunctionCall(node)
+
+            # chaining uses less memory
+            queue = itertools.chain(queue, ast.iter_child_nodes(curr))
         except StopIteration:
+            # we reached the end of our iterator
             break
 
 
