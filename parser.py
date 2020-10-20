@@ -1,7 +1,7 @@
 import ast
 from contextlib import contextmanager
 from types import ModuleType
-from typing import List, Generator
+from typing import List, Generator, Tuple
 import test
 import inspect
 from collections import defaultdict, deque
@@ -43,6 +43,11 @@ class Context(dict):
         elif _isFunctionDef(node):
             self['function'] = node
 
+    @property
+    def path(self):
+        prefix = (self.__parent.path if self.__parent else '')
+        return prefix + '#' + self.__name
+
 
 class DeclarationMap(defaultdict):
     '''
@@ -66,12 +71,7 @@ _references = defaultdict(list)
 
 @lru_cache(maxsize=100)
 def encodeID(name: str, context: Context):
-    path = ''
-
-    while context:
-        path = "{}#{}".format(context.name, path)
-        context = context._parent
-    return base64.b64encode(path + name)
+    return base64.b64encode(context.path + name)
 
 
 @lru_cache(maxsize=100)
@@ -79,31 +79,37 @@ def decodeID(id: str):
     return base64.b64decode(id).split('#')[-1]
 
 
-def _extractFunctionCall(node: ast.Call):
-    print(node)
+def _extractFunctionCall(node: ast.Call, context: Context):
+    referenceFunctionName = node.func.id
 
-    pass
+    # essentially, we climb our context to find the most appropriate one
+    while context != None:
+        if hasattr(context, referenceFunctionName):
+            context[referenceFunctionName].append(node)
+            return
+
+        context = context._parent
+
+    print("Could not find function for {}".format(node.func.id))
+
+
+def swapContext(parentContext: Context) -> Tuple[Context, Context]:
+    context = Context()
+    parentContext.addChild(context)
+    return parentContext, context
 
 
 def findTestCaseCalls(node: ast, context: Context = _global_context):
-    queue: Generator = iter([node])
-    prevContext, currContext = context, context
+    if _isScopeCreator(node):
+        # we ought to keep looking through oulr queue, especially through our new citizens
+        print(node.name)
+        _, context = swapContext(context)
 
-    while True:
-        try:
-            curr = next(queue)
-            print(curr)
-            if _isScopeCreator(curr):
-                # we ought to keep looking through oulr queue, especially through our new citizens
+    elif _isCall(node):
+        _extractFunctionCall(node, context)
 
-            elif _isCall(curr):
-                _extractFunctionCall(node)
-
-            # chaining uses less memory
-            queue = itertools.chain(queue, ast.iter_child_nodes(curr))
-        except StopIteration:
-            # we reached the end of our iterator
-            break
+    for nextNode in ast.iter_child_nodes(node):
+        findTestCaseCalls(nextNode, context)
 
 
 def findUnitTestClass(node: ast.ClassDef):
