@@ -89,12 +89,14 @@ def decodeID(id: str):
 
 def _extractFunctionCall(node: ast.Call, context: Context):
     referenceFunctionName = node.func.id
+    callContext = context
 
     # essentially, we climb our context to find the most appropriate one
     while context != None:
 
         if referenceFunctionName in context:
             context[referenceFunctionName].references.append(node)
+            node.context = callContext
             return
 
         context = context._parent
@@ -131,8 +133,8 @@ def findUnitTestClass(node: ast.ClassDef):
 
 
 # main thread starter that starts everything
-def doWork():
-    with open("test.py", "r") as source:
+def doWork(module: str, target: str):
+    with open("{}.py".format(module), "r") as source:
         tree = ast.parse(source.read())
 
     # just look one level down for the test
@@ -143,8 +145,10 @@ def doWork():
 
     while stack:
         context = stack.pop()
-
         stack.extend(context._children)
 
+        for functionName, refs in context.items():
+            print(ast.dump())
 
-doWork()
+
+doWork('test', 'increment')
