@@ -9,4 +9,3 @@ def increment(n: Number) -> Number:
 class Test1(unittest.TestCase):
     def test(self):
         increment(4)
-        # self.assertEqual(increment(3), 4)
