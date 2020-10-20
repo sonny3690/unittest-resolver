@@ -12,21 +12,36 @@ import base64
 from functools import lru_cache
 
 
-class Context(dict):
-    def __init__(self, *, parent=None, name='global'):
-        self.__parent = parent
+class Context(defaultdict):
+    def __init__(self, *, obj=None, name='global'):
+        super().__init__(list)
+
+        self.__parent = None
         self.__children = []
 
         # name should be immutable
-        self.__name = name
+        self._obj: ast = obj
+        self._name: str = name
+
+        # defined in the constructor since it's an immutable property
+        self.isTestingContext = isinstance(
+            obj, ast.ClassDef) and Context.__checkClassBase(obj)
+
+    @staticmethod
+    def __checkClassBase(node: ast.ClassDef) -> bool:
+        return any(map(lambda base: base.value.id == 'unittest' and base.attr == 'TestCase', node.bases))
 
     @property
     def _parent(self):
         return self.__parent
 
     @property
-    def name(self):
-        return self.__name
+    def _children(self):
+        return self.__children
+
+    @property
+    def obj(self):
+        return self._obj
 
     @_parent.setter
     def _parent(self, parent):
@@ -46,32 +61,25 @@ class Context(dict):
     @property
     def path(self):
         prefix = (self.__parent.path if self.__parent else '')
-        return prefix + '#' + self.__name
+        return prefix + '#' + self._name
 
 
-class DeclarationMap(defaultdict):
-    '''
-    Mapping of declarationID to references in the form of ast nodes.
+class Declaration:
+    def __init__(self, source: ast, name: str):
+        self.source = source
+        self.name = name
+        self.references = []
 
-    It's not collision proof unfortunately, but we'll have to do without it for now.
-    '''
-    ...
-
-
-class idMap(dict):
-    '''
-    Maps declarationID to node
-    '''
-    ...
+    def __repr__(self):
+        return "{} w/ references {}".format(self.name, self.references)
 
 
 _global_context = Context()
-_references = defaultdict(list)
 
 
 @lru_cache(maxsize=100)
 def encodeID(name: str, context: Context):
-    return base64.b64encode(context.path + name)
+    return base64.b64encode(context.path + '#' + name)
 
 
 @lru_cache(maxsize=100)
@@ -84,8 +92,9 @@ def _extractFunctionCall(node: ast.Call, context: Context):
 
     # essentially, we climb our context to find the most appropriate one
     while context != None:
-        if hasattr(context, referenceFunctionName):
-            context[referenceFunctionName].append(node)
+
+        if referenceFunctionName in context:
+            context[referenceFunctionName].references.append(node)
             return
 
         context = context._parent
@@ -93,19 +102,24 @@ def _extractFunctionCall(node: ast.Call, context: Context):
     print("Could not find function for {}".format(node.func.id))
 
 
-def swapContext(parentContext: Context) -> Tuple[Context, Context]:
-    context = Context()
+def swapContext(parentContext: Context, node: ast) -> Tuple[Context, Context]:
+    context = Context(obj=node, name=node.name)
     parentContext.addChild(context)
+
+    context.isTestingContext = parentContext.isTestingContext or context.isTestingContext
+    parentContext[node.name] = Declaration(node, node.name)
+
     return parentContext, context
 
 
 def findTestCaseCalls(node: ast, context: Context = _global_context):
-    if _isScopeCreator(node):
-        # we ought to keep looking through oulr queue, especially through our new citizens
-        print(node.name)
-        _, context = swapContext(context)
 
-    elif _isCall(node):
+    if _isScopeCreator(node):
+        print('creating scope for ', node.name)
+        # we ought to keep looking through oulr queue, especially through our new citizens
+        _, context = swapContext(context, node)
+
+    elif _isCall(node) and context.isTestingContext:
         _extractFunctionCall(node, context)
 
     for nextNode in ast.iter_child_nodes(node):
@@ -113,15 +127,7 @@ def findTestCaseCalls(node: ast, context: Context = _global_context):
 
 
 def findUnitTestClass(node: ast.ClassDef):
-
-    # unit test identifier
-    def _isUnitTest(base: List[ast.expr]) -> bool:
-        return base.value.id == 'unittest' and base.attr == 'TestCase'
-
-    if _isClassDef(node):
-        if not any(map(_isUnitTest, node.bases)):
-            return False
-        findTestCaseCalls(node)
+    findTestCaseCalls(node)
 
 
 # main thread starter that starts everything
@@ -132,6 +138,13 @@ def doWork():
     # just look one level down for the test
     for node in ast.iter_child_nodes(tree):
         findUnitTestClass(node)
+
+    stack = [_global_context]
+
+    while stack:
+        context = stack.pop()
+
+        stack.extend(context._children)
 
 
 doWork()
