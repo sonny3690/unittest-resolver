@@ -105,6 +105,7 @@ def _extractFunctionCall(node: ast.Call, context: Context):
 
 
 def swapContext(parentContext: Context, node: ast) -> Tuple[Context, Context]:
+    print(inspect.getsource(node.__class__))
     context = Context(obj=node, name=node.name)
     parentContext.addChild(context)
 
@@ -147,8 +148,10 @@ def doWork(module: str, target: str):
         context = stack.pop()
         stack.extend(context._children)
 
-        for functionName, refs in context.items():
-            print(ast.dump())
+        for functionName, declaration in context.items():
 
+            if len(declaration.references) > 0 and functionName.strip() == target.strip():
+                print("Evaluating {}...", functionName)
+                dump = ast.dump(declaration.references[0].context.obj)
 
-doWork('test', 'increment')
+                print(eval(compile(dump, filename='<ast>', mode='exec')))
